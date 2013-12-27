@@ -254,7 +254,7 @@
     (rejected-fn server)))
 
 (defn update-commit-index [server commit-index]
-  (assoc-in server [:commit-index] commit-index))
+  (assoc server :commit-index commit-index))
 
 (defn remove-last-log-entry [server]
   (update-in server [:log] butlast))
@@ -324,18 +324,29 @@
       last-agreed-index
       (:commit-index server))))
 
+(defn append-entries-accepted? [last-agreed-index]
+  (> last-agreed-index no-entries-log-index))
+
+(defn update-leader-commit-index [server]
+  (assoc server :commit-index (new-commit-index server)))
+
+(defn record-append-entries-acceptance [server peer-id last-agreed-index]
+  (-> server
+      (assoc-in [:next-index peer-id] (inc last-agreed-index))
+      (assoc-in [:last-agreed-index peer-id] last-agreed-index)))
+
+(defn record-append-entries-rejection [server peer-id]
+  (update-in server [:next-index peer-id] dec))
+
 ;; TODO: prevent dec beyond earliest
 (defn handle-append-entries-response [server args]
-  (let [peer-id (:sender args)
-        last-agreed-index (:last-agreed-index args)]
+  (let [{:keys [sender last-agreed-index]} args]
     {:server
-     (if (> last-agreed-index no-entries-log-index)
+     (if (append-entries-accepted? last-agreed-index)
        (-> server
-           (assoc-in [:next-index peer-id] (inc last-agreed-index))
-           (assoc-in [:last-agreed-index peer-id] last-agreed-index)
-           (#(assoc % :commit-index (new-commit-index %))))
-       (update-in server [:next-index peer-id] dec))
-     }))
+           (record-append-entries-acceptance sender last-agreed-index)
+           (update-leader-commit-index))
+       (record-append-entries-rejection server sender))}))
 
 (defn add-new-log-entry [server command committed-fn]
   (add-log-entries server [{:term (:term server),
