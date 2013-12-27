@@ -241,7 +241,16 @@
           (is (= {id true} (:votes server))))
 
         (testing "It requests votes"
-          (is (= :request-vote (:name rpc))))))))
+          (is (= :request-vote (:name rpc)))))
+
+      (testing "But it is the leader"
+        (let [server (init-leader server)
+              old-server server
+              {:keys [server side-effects]} (recv-timeout server nil)]
+          (testing "It does not change"
+            (is (= old-server server)))
+          (testing "It has no side-effects"
+            (is (empty? side-effects))))))))
 
 (deftest vote-requested
   (let [id 42

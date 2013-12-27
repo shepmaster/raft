@@ -186,7 +186,7 @@
 ;; Message handlers
 
 (defn handle-timeout [server _]
-  (if (leader? server) ;; TODO add test for this
+  (if (leader? server)
     {:server server}
     (let [server (become-candidate server)]
       {:server server
