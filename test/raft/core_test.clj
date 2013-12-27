@@ -303,25 +303,25 @@
         server {:id id, :term 0, :peers peers}
         server (-> server (init-log-vars (fake-log 20)) init-leader)
         old-server server
-        recv-append-resp (receive-partial :append-entries-response)]
+        recv-append-resp (receive-partial :append-entries-response)
+        next-index (fn [server peer-n] (get-in server [:next-index (peer-id peer-n)]))
+        last-agreed-index (fn [server peer-n] (get-in server [:last-agreed-index (peer-id peer-n)]))]
     (testing "When a peer rejects the entries"
       (let [request {:sender (peer-id 0), :last-agreed-index no-entries-log-index}
-            {:keys [server side-effects]} (recv-append-resp server request)
-            rpc (first side-effects)]
-      (testing "It decreases that peer's next index"
-        (is (= (dec (get-in old-server [:next-index (peer-id 0)]))
-               (get-in server [:next-index (peer-id 0)]))))))
+            {:keys [server _]} (recv-append-resp server request)]
+        (testing "It decreases that peer's next index"
+          (is (= (dec (next-index old-server 0))
+                 (next-index server 0))))))
 
     (testing "When a peer accepts the entries"
       (let [request {:sender (peer-id 0), :last-agreed-index 10}
-            {:keys [server side-effects]} (recv-append-resp server request)
-            rpc (first side-effects)]
+            {:keys [server _]} (recv-append-resp server request)]
         (testing "It updates the next index"
           (is (= (inc (:last-agreed-index request))
-                 (get-in server [:next-index (peer-id 0)]))))
+                 (next-index server 0))))
         (testing "It updates the last-agreed index"
           (is (= (:last-agreed-index request)
-                 (get-in server [:last-agreed-index (peer-id 0)]))))))
+                 (last-agreed-index server 0))))))
 
     (testing "When a majority of the peers accept an index"
       (let [request {:sender (peer-id 0), :last-agreed-index 10}
