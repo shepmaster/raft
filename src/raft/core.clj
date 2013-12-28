@@ -32,7 +32,6 @@
 (defrecord RPCSend [to name args])
 (defrecord RPCReply [name args])
 (defrecord RPCBroadcast [name args])
-(defrecord HeartbeatStart [])
 
 ;; --
 
