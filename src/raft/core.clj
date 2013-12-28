@@ -336,9 +336,9 @@
       (assoc-in [:last-agreed-index peer-id] last-agreed-index)))
 
 (defn record-append-entries-rejection [server peer-id]
-  (update-in server [:next-index peer-id] dec))
+  (update-in server [:next-index peer-id] #(max (dec %)
+                                                first-log-entry-index)))
 
-;; TODO: prevent dec beyond earliest
 (defn handle-append-entries-response [server args]
   (let [{:keys [sender last-agreed-index]} args]
     {:server

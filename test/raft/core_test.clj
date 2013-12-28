@@ -108,6 +108,9 @@
                                    (receive-pure follower :append-entries)))]
         (is (= [entry] (:log follower)))))))
 
+(defn set-next-index [server peer-id idx]
+  (assoc-in server [:next-index peer-id] idx))
+
 (deftest creating-append-entries-requests
   (let [peer-id :peer-id
         entry1 {:term 4, :command :dummy1}
@@ -116,7 +119,7 @@
         server (-> {:term 10, :id 99, :next-index {}}
                    (add-test-log-entries entry1 entry2 entry3))
         build-request (fn [server] (create-append-entries-request server peer-id))
-        set-next-index (fn [server idx] (assoc-in server [:next-index peer-id] idx))]
+        set-next-index (fn [server idx] (set-next-index server peer-id idx))]
 
     (testing "Bookkeeping"
       (let [request (build-request server)]
@@ -300,18 +303,26 @@
   (let [peers [{:id 1} {:id 2} {:id 3} {:id 4} {:id 5}]
         id (:id (last peers))
         peer-id (fn [n] (:id (peers n)))
-        server {:id id, :term 0, :peers peers}
-        server (-> server (init-log-vars (fake-log 20)) init-leader)
+        server (-> {:id id, :term 0, :peers peers}
+                   (init-log-vars (fake-log 20))
+                   (init-leader)
+                   (set-next-index (peer-id 0) 10))
         old-server server
         recv-append-resp (receive-partial :append-entries-response)
         next-index (fn [server peer-n] (get-in server [:next-index (peer-id peer-n)]))
         last-agreed-index (fn [server peer-n] (get-in server [:last-agreed-index (peer-id peer-n)]))]
+
     (testing "When a peer rejects the entries"
       (let [request {:sender (peer-id 0), :last-agreed-index no-entries-log-index}
             {:keys [server _]} (recv-append-resp server request)]
         (testing "It decreases that peer's next index"
           (is (= (dec (next-index old-server 0))
-                 (next-index server 0))))))
+                 (next-index server 0))))
+        (testing "but the next index is already at the beginning"
+          (let [server (set-next-index server (peer-id 0) first-log-entry-index)
+                {:keys [server _]} (recv-append-resp server request)]
+            (testing "It doesn't decrease it further"
+              (is (<= first-log-entry-index (next-index server 0))))))))
 
     (testing "When a peer accepts the entries"
       (let [request {:sender (peer-id 0), :last-agreed-index 10}
