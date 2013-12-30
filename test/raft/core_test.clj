@@ -299,9 +299,9 @@
           (is (leader? server)))))))
 
 (deftest append-entries-responded
-  (let [peers [{:id 1} {:id 2} {:id 3} {:id 4} {:id 5}]
-        id (:id (last peers))
-        peer-id (fn [n] (:id (peers n)))
+  (let [id 42
+        peers [1 2 3 4 id]
+        peer-id (fn [n] (peers n))
         server (-> {:id id, :term 0, :peers peers}
                    (init-log-vars (fake-log 20))
                    (init-leader)
@@ -344,7 +344,7 @@
 
 (deftest user-adds-commands
   (let [id 42
-        peers [{:id 1} {:id 2} {:id 3} {:id 4} {:id id}]
+        peers [1 2 3 4 id]
         server {:id id, :term 0, :peers peers}
         old-server server
         recv-user-cmd (receive-partial :user-command)]

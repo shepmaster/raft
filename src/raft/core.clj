@@ -3,27 +3,27 @@
   (:require [clojure.set :as set]))
 
 (defprotocol RPCOut
-  (rpc-send [this peer-info name args])
-  (rpc-broadcast [this peer-infos name args]))
+  (rpc-send [this peer-id name args])
+  (rpc-broadcast [this peer-ids name args]))
 
 (defprotocol RPCIn
-  (rpc-receive [this peer-info timeout timeout-units]))
+  (rpc-receive [this peer-id timeout timeout-units]))
 
 (defrecord InMemoryRPC [sockets]
   RPCOut
-  (rpc-send [this peer-info name args]
-    (let [socket (get sockets (:id peer-info))]
+  (rpc-send [this peer-id name args]
+    (let [socket (get sockets peer-id)]
       (.put socket [name args]))
     this)
 
-  (rpc-broadcast [this peer-infos name args]
-    (doseq [peer-info peer-infos]
-      (rpc-send this peer-info name args))
+  (rpc-broadcast [this peer-ids name args]
+    (doseq [peer-id peer-ids]
+      (rpc-send this peer-id name args))
     this)
 
   RPCIn
-  (rpc-receive [this peer-info timeout timeout-units]
-    (let [socket (get sockets (:id peer-info))]
+  (rpc-receive [this peer-id timeout timeout-units]
+    (let [socket (get sockets peer-id)]
       (.poll socket timeout timeout-units))))
 
 (defn create-in-memory-rpc
@@ -49,15 +49,9 @@
 ;; as no log entries are in term 0...
 (def no-entries-log-term 0)
 
-(defn peer-info-by-id [server id]
-  (first (filter #(= (:id %) id) (:peers server))))
-
-(defn self-peer-info [server]
-  (peer-info-by-id server (:id server)))
-
-(defn other-peer-infos
+(defn other-peer-ids
   [server]
-  (filter #(not= (:id %) (:id server)) (:peers server)))
+  (remove #{(:id server)} (:peers server)))
 
 (defn vote-count [server]
   (count (filter identity (vals (:votes server))))) ;; CHECK: use true? instead
@@ -139,13 +133,10 @@
 (defn leader? [server]
   (= (:state server) :leader))
 
-(defn peer-ids [server]
-  (map :id (:peers server)))
-
 (defn peer-map
   "Creates a map from each peer-id to a constant value."
   [server v]
-  (zipmap (peer-ids server) (repeat v)))
+  (zipmap (:peers server) (repeat v)))
 
 (defn init-leader [server]
   (assoc server
@@ -356,7 +347,7 @@
 
 (defn create-all-append-entries-requests [server]
   (map (fn [id] (->RPCSend id :append-entries (create-append-entries-request server id)))
-       (map :id (other-peer-infos server))))
+       (other-peer-ids server)))
 
 ;; TODO: assert only leader
 (defn handle-user-command [server args]
@@ -395,9 +386,9 @@
       (let [{:keys [sender]} args
             {:keys [name args]} side-effect]
         (condp = (class side-effect)
-          RPCBroadcast (send-off rpc rpc-broadcast (other-peer-infos server) name args)
-          RPCReply (send-off rpc rpc-send (peer-info-by-id server sender) name args)
-          RPCSend (send-off rpc rpc-send (peer-info-by-id server (:to side-effect)) name args))))
+          RPCBroadcast (send-off rpc rpc-broadcast (other-peer-ids server) name args)
+          RPCReply (send-off rpc rpc-send sender name args)
+          RPCSend (send-off rpc rpc-send (:to side-effect) name args))))
     server))
 
 ;; User commands
@@ -423,11 +414,10 @@
       (process-message :timeout nil))
     (recur switch recv process-message)))
 
-(defn create-message-in [rpc server-agt process-message]
+(defn create-message-in [rpc peer-id process-message]
   (let [switch (atom true)
         timeout-ms (rand-int-in election-timeout-ms-min election-timeout-ms-max)
-        peer-info (self-peer-info @server-agt)
-        recv (partial rpc-receive rpc peer-info timeout-ms TimeUnit/MILLISECONDS)]
+        recv (partial rpc-receive rpc peer-id timeout-ms TimeUnit/MILLISECONDS)]
     {:switch switch
      :timeout-ms timeout-ms
      :pump (Thread. (partial message-pump switch recv process-message))}))
@@ -445,7 +435,7 @@
     {:process-message process-message
      :message-out message-out
      :server-agt server-agt
-     :message-in (create-message-in rpc server-agt process-message)
+     :message-in (create-message-in rpc id process-message)
      :heartbeat (create-heartbeat)}))
 
 (def heartbeat-period-ms 50)
@@ -468,6 +458,8 @@
 
 (defn create-servers []
   (let [peer-ids [1 2 3]
-        peer-infos (map (partial hash-map :id) peer-ids)
         rpc (create-in-memory-rpc peer-ids)]
-    (mapv #(create-server+ % peer-infos rpc) peer-ids)))
+    (mapv #(create-server+ % peer-ids rpc) peer-ids)))
+
+(defn each-server [servers f]
+  (map #(-> % :server-agt deref f) servers))
