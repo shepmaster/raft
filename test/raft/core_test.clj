@@ -7,7 +7,7 @@
             [raft.core :refer :all]))
 
 (deftest initial-state
-  (let [server (create-server nil nil nil)]
+  (let [server (create-server nil nil)]
     (testing "The server starts out as a follower"
       (is (follower? server)))))
 
@@ -79,8 +79,7 @@
 (def gen-server-args
   (gen/bind gen-peer-set
             #(gen/tuple (gen/return (:id (first %))) ;; Better way than first?
-                        (gen/return %)
-                        (gen/return nil))))
+                        (gen/return %))))
 (def gen-server
   (gen/fmap (partial apply create-server)
             gen-server-args))

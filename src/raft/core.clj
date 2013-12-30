@@ -89,11 +89,10 @@
 (defn create-server
   "peers must be a sequence of connection information with the key
   :id. This server should be included in peers"
-  [id peers rpc]
+  [id peers]
   (-> {:id id
        :state :follower
        :peers (set peers)
-       :rpc rpc
        :term 0
        :last-applied 0}
       (init-log-vars)))
@@ -390,11 +389,10 @@
         (handler args))
     (throw (Exception. (str "Unknown message " name)))))
 
-(defn receive* [server name args]
+(defn receive* [server rpc name args]
   (let [{:keys [server side-effects]} (receive-pure server name args)]
     (doseq [side-effect side-effects]
       (let [{:keys [sender]} args
-            {:keys [rpc]} server
             {:keys [name args]} side-effect]
         (condp = (class side-effect)
           RPCBroadcast (send-off rpc rpc-broadcast (other-peer-infos server) name args)
@@ -411,10 +409,6 @@
 
 ;; Start 3 servers, expect that term will stabilize, one will be
 ;; leader, others follower
-
-;; TODO: Should `receive` be pulled out / merged with the message
-;; pump?  Probably. Need to figure out how / if RPC should be
-;; different. Maybe having create make an agent is wrong?
 
 ;; TODO: unify the create-* RPC functions w.r.t. how they create records
 
@@ -446,8 +440,8 @@
 
 (defn create-server+ [id peers rpc]
   (let [message-out (agent rpc)
-        server-agt (agent (create-server id peers message-out))
-        process-message (partial send server-agt receive*)]
+        server-agt (agent (create-server id peers))
+        process-message (partial send server-agt receive* message-out)]
     {:process-message process-message
      :message-out message-out
      :server-agt server-agt
