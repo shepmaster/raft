@@ -2,13 +2,15 @@
   (:import (java.util.concurrent LinkedBlockingQueue TimeUnit))
   (:require [clojure.set :as set]))
 
-(defprotocol RPC
+(defprotocol RPCOut
   (rpc-send [this peer-info name args])
-  (rpc-broadcast [this peer-infos name args])
+  (rpc-broadcast [this peer-infos name args]))
+
+(defprotocol RPCIn
   (rpc-receive [this peer-info timeout timeout-units]))
 
 (defrecord InMemoryRPC [sockets]
-  RPC
+  RPCOut
   (rpc-send [this peer-info name args]
     (let [socket (get sockets (:id peer-info))]
       (.put socket [name args]))
@@ -19,6 +21,7 @@
       (rpc-send this peer-info name args))
     this)
 
+  RPCIn
   (rpc-receive [this peer-info timeout timeout-units]
     (let [socket (get sockets (:id peer-info))]
       (.poll socket timeout timeout-units))))
