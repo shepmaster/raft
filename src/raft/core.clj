@@ -453,15 +453,15 @@
 (def heartbeat-period-ms 50)
 
 (defn start-time-things [server+]
-  (.start (:pump (:pump server+)))
+  (.start (-> server+ :message-in :pump))
   (assoc-in server+
             [:heartbeat :task]
-            (.scheduleAtFixedRate (:pool (:heartbeat server+))
-                                  (partial heartbeat (:server-agt server+))
+            (.scheduleAtFixedRate (-> server+ :heartbeat :pool)
+                                  (partial heartbeat (:process-message server+))
                                   0 heartbeat-period-ms TimeUnit/MILLISECONDS)))
 
 (defn stop-time-things [server+]
-  (swap! (-> server+ :pump :switch) not)
+  (swap! (-> server+ :message-in :switch) not)
   (.cancel (-> server+ :heartbeat :task) true))
 
 (defn user-command [server+ command]
