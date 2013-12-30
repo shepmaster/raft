@@ -419,35 +419,36 @@
 
 ;; TODO: discard out-of date messages
 
-(defn message-pump [rpc server-agt timeout-ms switch]
+(defn message-pump [switch recv process-message]
   (when @switch
-    (if-let [[name args] (rpc-receive rpc
-                                      (self-peer-info @server-agt)
-                                      timeout-ms
-                                      TimeUnit/MILLISECONDS)]
-      (send-off server-agt receive* name args)
-      (send-off server-agt receive* :timeout nil))
-    (recur rpc server-agt timeout-ms switch)))
+    (if-let [[name args] (recv)]
+      (process-message name args)
+      (process-message :timeout nil))
+    (recur switch recv process-message)))
 
-(defn create-message-in [rpc server-agt]
+(defn create-message-in [rpc server-agt process-message]
   (let [switch (atom true)
-        timeout-ms (rand-int-in election-timeout-ms-min election-timeout-ms-max)]
+        timeout-ms (rand-int-in election-timeout-ms-min election-timeout-ms-max)
+        peer-info (self-peer-info @server-agt)
+        recv (partial rpc-receive rpc peer-info timeout-ms TimeUnit/MILLISECONDS)]
     {:switch switch
      :timeout-ms timeout-ms
-     :pump (Thread. (partial message-pump rpc server-agt timeout-ms switch))}))
+     :pump (Thread. (partial message-pump switch recv process-message))}))
 
-(defn heartbeat [server-agt]
-  (send-off server-agt receive* :heartbeat nil))
+(defn heartbeat [process-message]
+  (process-message :heartbeat nil))
 
 (defn create-heartbeat []
   {:pool (java.util.concurrent.Executors/newScheduledThreadPool 3)})
 
 (defn create-server+ [id peers rpc]
   (let [message-out (agent rpc)
-        server-agt (agent (create-server id peers message-out))]
-    {:message-out message-out
+        server-agt (agent (create-server id peers message-out))
+        process-message (partial send server-agt receive*)]
+    {:process-message process-message
+     :message-out message-out
      :server-agt server-agt
-     :pump (create-message-in rpc server-agt)
+     :message-in (create-message-in rpc server-agt process-message)
      :heartbeat (create-heartbeat)}))
 
 (def heartbeat-period-ms 50)
@@ -465,7 +466,8 @@
   (.cancel (-> server+ :heartbeat :task) true))
 
 (defn user-command [server+ command]
-  (send (:server-agt server+) receive* :user-command {:command command}))
+  (let [{:keys [process-message]} server+]
+    (process-message :user-command {:command command})))
 
 (defn create-servers []
   (let [peer-ids [1 2 3]
