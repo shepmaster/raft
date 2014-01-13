@@ -81,8 +81,8 @@
 (def election-timeout-ms-max 300)
 
 (defn create-server
-  "peers must be a sequence of connection information with the key
-  :id. This server should be included in peers"
+  "peers must be a sequence of connection ids. This server should be
+  included in peers"
   [id peers]
   (-> {:id id
        :state :follower
