@@ -117,6 +117,9 @@
   {:sender (:id server)
    :term (:term server)})
 
+(defn create-request-vote [server]
+  (create-rpc-args server))
+
 (defn voted-for? [server peer-id]
   (= (:voted-for server) peer-id))
 
@@ -183,7 +186,7 @@
     (let [server (become-candidate server)]
       {:server server
        :side-effects [(->RPCBroadcast :request-vote
-                                      (create-rpc-args server))]})))
+                                      (create-request-vote server))]})))
 
 (defn handle-request-vote [server args]
   (let [sender (:sender args)
