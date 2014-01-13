@@ -267,7 +267,7 @@
             (is (:vote-granted (:args rpc))))))
 
       (testing "But we have already voted for someone else"
-        (let [{:keys [server _]}            (recv-vote-req server {:sender 1})
+        (let [{:keys [server]}              (recv-vote-req server {:sender 1})
               {:keys [server side-effects]} (recv-vote-req server {:sender 2})
               rpc (first side-effects)]
           (testing "It does not vote for the candidate"
@@ -275,7 +275,7 @@
             (is (not (:vote-granted (:args rpc)))))))
 
       (testing "But we have already voted for the candidate"
-        (let [{:keys [server _]}            (recv-vote-req server {:sender 1})
+        (let [{:keys [server]}              (recv-vote-req server {:sender 1})
               {:keys [server side-effects]} (recv-vote-req server {:sender 1})
               rpc (first side-effects)]
           (testing "It votes for the candidate"
@@ -289,12 +289,12 @@
         recv-vote (receive-partial :request-vote-response)]
     (testing "When a peer responds with a vote"
       (testing "And we do not have the majority of votes"
-        (let [{:keys [server _]} (recv-vote server {:sender 2, :vote-granted true})]
+        (let [{:keys [server]} (recv-vote server {:sender 2, :vote-granted true})]
           (is (candidate? server))))
 
       (testing "And we have the majority of votes"
-        (let [{:keys [server _]} (recv-vote server {:sender 2, :vote-granted true})
-              {:keys [server _]} (recv-vote server {:sender 3, :vote-granted true})]
+        (let [{:keys [server]} (recv-vote server {:sender 2, :vote-granted true})
+              {:keys [server]} (recv-vote server {:sender 3, :vote-granted true})]
           ;; Sends out heartbeat!
           (is (leader? server)))))))
 
@@ -313,19 +313,19 @@
 
     (testing "When a peer rejects the entries"
       (let [request {:sender (peer-id 0), :last-agreed-index no-entries-log-index}
-            {:keys [server _]} (recv-append-resp server request)]
+            {:keys [server]} (recv-append-resp server request)]
         (testing "It decreases that peer's next index"
           (is (= (dec (next-index old-server 0))
                  (next-index server 0))))
         (testing "but the next index is already at the beginning"
           (let [server (set-next-index server (peer-id 0) first-log-entry-index)
-                {:keys [server _]} (recv-append-resp server request)]
+                {:keys [server]} (recv-append-resp server request)]
             (testing "It doesn't decrease it further"
               (is (<= first-log-entry-index (next-index server 0))))))))
 
     (testing "When a peer accepts the entries"
       (let [request {:sender (peer-id 0), :last-agreed-index 10}
-            {:keys [server _]} (recv-append-resp server request)]
+            {:keys [server]} (recv-append-resp server request)]
         (testing "It updates the next index"
           (is (= (inc (:last-agreed-index request))
                  (next-index server 0))))
@@ -335,9 +335,9 @@
 
     (testing "When a majority of the peers accept an index"
       (let [request {:sender (peer-id 0), :last-agreed-index 10}
-            {:keys [server _]} (recv-append-resp server request)
+            {:keys [server]} (recv-append-resp server request)
             request {:sender (peer-id 1), :last-agreed-index 15}
-            {:keys [server _]} (recv-append-resp server request)]
+            {:keys [server]} (recv-append-resp server request)]
         (testing "It updates the commit index"
           (is (= 10
                  (:commit-index server))))))))
