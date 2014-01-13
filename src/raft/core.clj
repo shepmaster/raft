@@ -310,7 +310,7 @@
         quorum-size (majority-count server)]
     (first (take-last quorum-size (sort index-vals)))))
 
-(defn new-commit-index [server]
+(defn leader-last-agreed-commit-index [server]
   (let [last-agreed-index (quorum-last-agreed-index server)]
     (if (log-at-index-is-term? server last-agreed-index (:term server))
       last-agreed-index
@@ -320,7 +320,7 @@
   (> last-agreed-index no-entries-log-index))
 
 (defn update-leader-commit-index [server]
-  (assoc server :commit-index (new-commit-index server)))
+  (update-commit-index server (leader-last-agreed-commit-index server)))
 
 (defn record-append-entries-acceptance [server peer-id last-agreed-index]
   (-> server
