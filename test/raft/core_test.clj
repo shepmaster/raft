@@ -230,7 +230,7 @@
 
 (deftest timing-out
   (let [id 42
-        server {:id id, :term 0}
+        server {:id id, :term 0, :log [{:term 3} {:term 7}]}
         recv-timeout (receive-partial :timeout)]
     (testing "When a server times out"
       (let [{:keys [server side-effects]} (recv-timeout server nil)
@@ -243,7 +243,9 @@
           (is (= {id true} (:votes server))))
 
         (testing "It requests votes"
-          (is (= :request-vote (:name rpc)))))
+          (is (= :request-vote (:name rpc)))
+          (is (= 7 (-> rpc :args :last-log-term)))
+          (is (= 2 (-> rpc :args :last-log-index)))))
 
       (testing "But it is the leader"
         (let [server (init-leader server)
@@ -256,31 +258,54 @@
 
 (deftest vote-requested
   (let [id 42
-        server {:id id, :term 0}
+        server {:id id, :term 10}
         recv-vote-req (receive-partial :request-vote)]
     (testing "When a vote is requested"
       (testing "And we haven't voted for anyone"
-        (let [{:keys [server side-effects]} (recv-vote-req server {:sender 1})
+        (let [{:keys [server side-effects]} (recv-vote-req server {:sender 1,
+                                                                   :last-log-term 20})
               rpc (first side-effects)]
           (testing "It votes for the candidate"
             (is (= :request-vote-response (:name rpc)))
             (is (:vote-granted (:args rpc))))))
 
       (testing "But we have already voted for someone else"
-        (let [{:keys [server]}              (recv-vote-req server {:sender 1})
-              {:keys [server side-effects]} (recv-vote-req server {:sender 2})
+        (let [{:keys [server]}              (recv-vote-req server {:sender 1,
+                                                                   :last-log-term 20})
+              {:keys [server side-effects]} (recv-vote-req server {:sender 2,
+                                                                   :last-log-term 20})
               rpc (first side-effects)]
           (testing "It does not vote for the candidate"
             (is (= :request-vote-response (:name rpc)))
             (is (not (:vote-granted (:args rpc)))))))
 
       (testing "But we have already voted for the candidate"
-        (let [{:keys [server]}              (recv-vote-req server {:sender 1})
-              {:keys [server side-effects]} (recv-vote-req server {:sender 1})
+        (let [{:keys [server]}              (recv-vote-req server {:sender 1,
+                                                                   :last-log-term 20})
+              {:keys [server side-effects]} (recv-vote-req server {:sender 1,
+                                                                   :last-log-term 20})
               rpc (first side-effects)]
           (testing "It votes for the candidate"
             (is (= :request-vote-response (:name rpc)))
-            (is (:vote-granted (:args rpc)))))))))
+            (is (:vote-granted (:args rpc))))))
+
+      (testing "But the candidate is not up-to-date"
+        (let [server (assoc server :log [{:term 7} {:term 10}])]
+          (testing "Because the candidate's log term is old"
+            (let [{:keys [server side-effects]} (recv-vote-req server {:sender 1,
+                                                                       :last-log-term 5})
+                  rpc (first side-effects)]
+              (testing "It does not vote for the candidate"
+                (is (= :request-vote-response (:name rpc)))
+                (is (not (:vote-granted (:args rpc)))))))
+          (testing "Because the candidate's log index does not match"
+            (let [{:keys [server side-effects]} (recv-vote-req server {:sender 1,
+                                                                       :last-log-term 10,
+                                                                       :last-log-index 1})
+                  rpc (first side-effects)]
+              (testing "It does not vote for the candidate"
+                (is (= :request-vote-response (:name rpc)))
+                (is (not (:vote-granted (:args rpc))))))))))))
 
 (deftest vote-responded
   (let [id 42

@@ -117,8 +117,16 @@
   {:sender (:id server)
    :term (:term server)})
 
+(defn last-log-term [server]
+  (:term (last (:log server)) no-entries-log-term))
+
+(defn log-length [server]
+  (count (:log server)))
+
 (defn create-request-vote [server]
-  (create-rpc-args server))
+  (-> (create-rpc-args server)
+      (assoc :last-log-term (last-log-term server)
+             :last-log-index (log-length server))))
 
 (defn voted-for? [server peer-id]
   (= (:voted-for server) peer-id))
@@ -175,9 +183,6 @@
         (dissoc :voted-for))
     server))
 
-(defn log-length [server]
-  (count (:log server)))
-
 ;; Message handlers
 
 (defn handle-timeout [server _]
@@ -188,9 +193,18 @@
        :side-effects [(->RPCBroadcast :request-vote
                                       (create-request-vote server))]})))
 
+(defn vote-request-current? [server request-last-log-term request-last-log-index]
+  (or
+   (> request-last-log-term (last-log-term server))
+   (and
+    (= request-last-log-term (last-log-term server))
+    (>= request-last-log-index (log-length server)))))
+
 (defn handle-request-vote [server args]
-  (let [sender (:sender args)
-        server (vote-for server sender)]
+  (let [{:keys [sender last-log-term last-log-index]} args
+        server (if (vote-request-current? server last-log-term last-log-index)
+                 (vote-for server sender)
+                 server)]
     {:server server
      :side-effects [(->RPCReply :request-vote-response
                                 (create-request-vote-response server sender))]}))
