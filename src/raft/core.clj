@@ -357,10 +357,9 @@
            (update-leader-commit-index))
        (record-append-entries-rejection server sender))}))
 
-(defn add-new-log-entry [server command committed-fn]
+(defn add-new-log-entry [server command]
   (add-log-entries server [{:term (:term server),
-                            :command command,
-                            :committed-fn committed-fn}]))
+                            :command command}]))
 
 (defn create-all-append-entries-requests [server]
   (map (fn [id] (->RPCSend id :append-entries (create-append-entries-request server id)))
@@ -368,11 +367,11 @@
 
 ;; TODO: assert only leader
 (defn handle-user-command [server args]
-  (let [{:keys [command committed-fn]} args
-        server (add-new-log-entry server command committed-fn)]
+  (let [{:keys [command]} args
+        server (add-new-log-entry server command)]
     {:server server
      :side-effects (create-all-append-entries-requests server)}))
-  ;; inform user when done. Adding the function here means it gets sent too
+  ;; TODO: inform user when done.
 
 (defn handle-heartbeat [server _]
   {:server server
