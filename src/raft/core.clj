@@ -500,5 +500,8 @@
 (defn each-server [servers f]
   (map #(-> % :server-agt deref f) servers))
 
+(defn leaders [servers]
+  (filter #(leader? (-> % :server-agt deref)) servers))
+
 (defn leader [servers]
-  (first (filter #(leader? (-> % :server-agt deref)) servers)))
+  (first (leaders servers)))
