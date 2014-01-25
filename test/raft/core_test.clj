@@ -367,6 +367,9 @@
           (is (= 10
                  (:commit-index server))))))))
 
+(defn rpc-side-effects [side-effects]
+  (filter #(#{raft.core.RPCSend} (class %)) side-effects))
+
 (deftest user-adds-commands
   (let [id 42
         peers [1 2 3 4 id]
@@ -380,4 +383,4 @@
                  (log-length server))))
         (testing "It sends log updates to its peers"
           (is (= (dec (count (:peers server)))
-                 (count side-effects))))))))
+                 (count (rpc-side-effects side-effects)))))))))

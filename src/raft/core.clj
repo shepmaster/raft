@@ -35,6 +35,8 @@
 (defrecord RPCSend [to name args])
 (defrecord RPCReply [name args])
 (defrecord RPCBroadcast [name args])
+(defrecord LogEntryAdded [log-idx added-fn])
+(defrecord LogEntryCommitted [log-idx])
 
 ;; --
 
@@ -122,6 +124,9 @@
 
 (defn log-length [server]
   (count (:log server)))
+
+(defn last-log-entry-index [server]
+  (dec (log-length server)))
 
 (defn create-request-vote [server]
   (-> (create-rpc-args server)
@@ -350,12 +355,13 @@
 
 (defn handle-append-entries-response [server args]
   (let [{:keys [sender last-agreed-index]} args]
-    {:server
-     (if (append-entries-accepted? last-agreed-index)
-       (-> server
-           (record-append-entries-acceptance sender last-agreed-index)
-           (update-leader-commit-index))
-       (record-append-entries-rejection server sender))}))
+    (if (append-entries-accepted? last-agreed-index)
+      (let [server (-> server
+                       (record-append-entries-acceptance sender last-agreed-index)
+                       (update-leader-commit-index))]
+        {:server server
+         :side-effects [(->LogEntryCommitted (:commit-index server))]})
+      {:server (record-append-entries-rejection server sender)})))
 
 (defn add-new-log-entry [server command]
   (add-log-entries server [{:term (:term server),
@@ -367,11 +373,11 @@
 
 ;; TODO: assert only leader
 (defn handle-user-command [server args]
-  (let [{:keys [command]} args
+  (let [{:keys [command added-fn]} args
         server (add-new-log-entry server command)]
     {:server server
-     :side-effects (create-all-append-entries-requests server)}))
-  ;; TODO: inform user when done.
+     :side-effects (conj (create-all-append-entries-requests server)
+                         (->LogEntryAdded (last-log-entry-index server) added-fn))}))
 
 (defn handle-heartbeat [server _]
   {:server server
@@ -396,15 +402,18 @@
         (handler args))
     (throw (Exception. (str "Unknown message " name)))))
 
-(defn receive* [server rpc name args]
+(defn receive* [server rpc committed-fn name args]
   (let [{:keys [server side-effects]} (receive-pure server name args)]
     (doseq [side-effect side-effects]
       (let [{:keys [sender]} args
-            {:keys [name args]} side-effect]
+            {:keys [name args]} side-effect
+            {:keys [log-idx added-fn]} side-effect]
         (condp = (class side-effect)
           RPCBroadcast (send-off rpc rpc-broadcast (other-peer-ids server) name args)
           RPCReply (send-off rpc rpc-send sender name args)
-          RPCSend (send-off rpc rpc-send (:to side-effect) name args))))
+          RPCSend (send-off rpc rpc-send (:to side-effect) name args)
+          LogEntryAdded (added-fn log-idx)
+          LogEntryCommitted (committed-fn log-idx))))
     server))
 
 ;; User commands
@@ -444,15 +453,27 @@
 (defn create-heartbeat []
   {:pool (java.util.concurrent.Executors/newScheduledThreadPool 3)})
 
+(defn added-to-log [server+ idx-committed log-idx]
+  (let [{:keys [inflight]} server+]
+    (swap! inflight assoc log-idx idx-committed)))
+
+(defn committed-to-log [inflight log-idx]
+  (when-let [idx-committed (get @inflight log-idx)]
+    (deliver idx-committed true)
+    (swap! inflight dissoc log-idx)))
+
 (defn create-server+ [id peers rpc]
   (let [message-out (agent rpc)
         server-agt (agent (create-server id peers))
-        process-message (partial send server-agt receive* message-out)]
+        inflight (atom {})
+        committed-fn (partial committed-to-log inflight)
+        process-message (partial send server-agt receive* message-out committed-fn)]
     {:process-message process-message
      :message-out message-out
      :server-agt server-agt
      :message-in (create-message-in rpc id process-message)
-     :heartbeat (create-heartbeat)}))
+     :heartbeat (create-heartbeat)
+     :inflight inflight}))
 
 (def heartbeat-period-ms 50)
 
@@ -468,9 +489,15 @@
   (swap! (-> server+ :message-in :switch) not)
   (.cancel (-> server+ :heartbeat :task) true))
 
+(defn user-command* [server+ command]
+  (let [{:keys [process-message]} server+
+        idx-committed (promise)
+        added-fn (partial added-to-log server+ idx-committed)]
+    (process-message :user-command {:command command, :added-fn added-fn})
+    idx-committed))
+
 (defn user-command [server+ command]
-  (let [{:keys [process-message]} server+]
-    (process-message :user-command {:command command})))
+  @(user-command* server+ command))
 
 (defn create-servers []
   (let [peer-ids [1 2 3]
