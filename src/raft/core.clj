@@ -246,26 +246,24 @@
 (defn conflict? [server entry idx]
   (log-at-index-is-not-term? server idx (:term entry)))
 
-(defn discriminate-append-entries-request
-  [server args & {:keys [commit-fn conflict-fn no-conflict-fn rejected-fn]}]
+(defn discriminate-append-entries-request [server args]
   (if (accept-append-entries? server args)
     (let [idx (inc (:previous-log-index args))
-          entries (take 1 (:entries args))
-          entry (first entries)]
+          entry (first (:entries args))]
       (cond
        (or (heartbeat? args)
            (already-processed? server entry idx))
-       (commit-fn server (:commit-index args))
+       :commit
 
        (conflict? server entry idx)
-       (conflict-fn server)
+       :conflict
 
        (= (log-length server) idx)
-       (no-conflict-fn server entries)
+       :no-conflict
 
        :else
        (throw (Exception. "Unknown case"))))
-    (rejected-fn server)))
+    :rejected))
 
 (defn update-commit-index [server commit-index]
   (assoc server :commit-index commit-index))
@@ -289,27 +287,22 @@
 (defn create-reject-append-request [server]
   (create-append-request-reply server no-entries-log-index))
 
-(defn handle-append-entries [server args]
-  (discriminate-append-entries-request
-   server args
+(defmulti handle-append-entries discriminate-append-entries-request)
 
-   :commit-fn
-   (fn commit [server commit-index]
-     {:server  (update-commit-index server commit-index)
-      :side-effects [(create-accept-append-request server args)]})
+(defmethod handle-append-entries :commit [server args]
+  {:server (update-commit-index server (:commit-index args))
+   :side-effects [(create-accept-append-request server args)]})
 
-   :conflict-fn
-   (fn conflict [server]
-     {:server  (remove-last-log-entry server)})
+(defmethod handle-append-entries :conflict [server args]
+  {:server (remove-last-log-entry server)})
 
-   :no-conflict-fn
-   (fn no-conflict [server entries]
-     {:server  (add-log-entries server entries)})
+(defmethod handle-append-entries :no-conflict [server args]
+  (let [entries (take 1 (:entries args))]
+    {:server (add-log-entries server entries)}))
 
-   :rejected-fn
-   (fn rejected [server]
-     {:server  server
-      :side-effects [(create-reject-append-request server)]})))
+(defmethod handle-append-entries :rejected [server args]
+  {:server server
+   :side-effects [(create-reject-append-request server)]})
 
 (defn create-append-entries-request [server peer-id]
   (let [next-index (get-in server [:next-index peer-id] first-log-entry-index)
