@@ -409,21 +409,13 @@
           LogEntryCommitted (committed-fn log-idx))))
     server))
 
-;; User commands
-
-;; Testing has been: spin up "servers", step through transitions,
-;; verify the queue details and states.
-
-;; Integration test ideas -
-
-;; Start 3 servers, expect that term will stabilize, one will be
-;; leader, others follower
-
 ;; TODO: unify the create-* RPC functions w.r.t. how they create records
 
 ;; TODO: check all state precondition things
 
 ;; TODO: discard out-of date messages
+
+;; User commands
 
 (defn message-pump [switch recv process-message]
   (when @switch
@@ -500,5 +492,8 @@
 (defn each-server [servers f]
   (map #(-> % :server-agt deref f) servers))
 
+(defn leaders [servers]
+  (filter #(leader? (-> % :server-agt deref)) servers))
+
 (defn leader [servers]
-  (first (filter #(leader? (-> % :server-agt deref)) servers)))
+  (first (leaders servers)))
