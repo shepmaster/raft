@@ -384,32 +384,3 @@
         (testing "It sends log updates to its peers"
           (is (= (dec (count (:peers server)))
                  (count (rpc-side-effects side-effects)))))))))
-
-(defn wait-for
-  "Wait for a condition to become truthy. Returns `false` if the
-  timeout expires."
-  [timeout-ms f]
-  (if (>= timeout-ms 0)
-    (if-let [result (f)]
-      result
-      (do
-        (Thread/sleep 50)
-        (recur (- timeout-ms 50) f)))
-    false))
-
-(deftest full-scale
-  (let [servers (create-servers)
-        started (mapv start-time-things servers)]
-    (try
-      (testing "There is only one leader"
-        (is (wait-for 300 #(= 1 (count (leaders started))))))
-      (let [terms (each-server started :term)]
-        (testing "All the servers are on the same term"
-          (is (wait-for 300 #(= 1 (count (set terms))))))
-        (testing "It only takes one term to establish a leader"
-          (is (wait-for 300 #(= 1 (first terms))))))
-      (testing "A user command is committed in reasonable time"
-        (let [command-finished (user-command* (leader started) :command)]
-          (is (deref command-finished 300 false))))
-      (finally
-        (mapv stop-time-things started)))))

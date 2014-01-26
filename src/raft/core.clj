@@ -1,36 +1,6 @@
 (ns raft.core
-  (:import (java.util.concurrent LinkedBlockingQueue TimeUnit))
-  (:require [clojure.set :as set]))
-
-(defprotocol RPCOut
-  (rpc-send [this peer-id name args])
-  (rpc-broadcast [this peer-ids name args]))
-
-(defprotocol RPCIn
-  (rpc-receive [this peer-id timeout timeout-units]))
-
-(defrecord InMemoryRPC [sockets]
-  RPCOut
-  (rpc-send [this peer-id name args]
-    (let [socket (get sockets peer-id)]
-      (.put socket [name args]))
-    this)
-
-  (rpc-broadcast [this peer-ids name args]
-    (doseq [peer-id peer-ids]
-      (rpc-send this peer-id name args))
-    this)
-
-  RPCIn
-  (rpc-receive [this peer-id timeout timeout-units]
-    (let [socket (get sockets peer-id)]
-      (.poll socket timeout timeout-units))))
-
-(defn create-in-memory-rpc
-  ([]
-     (create-in-memory-rpc [0 1 2]))
-  ([peer-ids]
-     (->InMemoryRPC (zipmap peer-ids (repeatedly #(LinkedBlockingQueue.))))))
+  (:import (java.util.concurrent TimeUnit))
+  (:require [raft.rpc :as rpc]))
 
 (defrecord RPCSend [to name args])
 (defrecord RPCReply [name args])
@@ -402,9 +372,9 @@
             {:keys [name args]} side-effect
             {:keys [log-idx added-fn]} side-effect]
         (condp = (class side-effect)
-          RPCBroadcast (send-off rpc rpc-broadcast (other-peer-ids server) name args)
-          RPCReply (send-off rpc rpc-send sender name args)
-          RPCSend (send-off rpc rpc-send (:to side-effect) name args)
+          RPCBroadcast (send-off rpc rpc/broadcast (other-peer-ids server) name args)
+          RPCReply (send-off rpc rpc/send sender name args)
+          RPCSend (send-off rpc rpc/send (:to side-effect) name args)
           LogEntryAdded (added-fn log-idx)
           LogEntryCommitted (committed-fn log-idx))))
     server))
@@ -427,7 +397,7 @@
 (defn create-message-in [rpc peer-id process-message]
   (let [switch (atom true)
         timeout-ms (rand-int-in election-timeout-ms-min election-timeout-ms-max)
-        recv (partial rpc-receive rpc peer-id timeout-ms TimeUnit/MILLISECONDS)]
+        recv (partial rpc/receive rpc peer-id timeout-ms TimeUnit/MILLISECONDS)]
     {:switch switch
      :timeout-ms timeout-ms
      :pump (Thread. (partial message-pump switch recv process-message))}))
@@ -483,17 +453,3 @@
 
 (defn user-command [server+ command]
   @(user-command* server+ command))
-
-(defn create-servers []
-  (let [peer-ids [1 2 3]
-        rpc (create-in-memory-rpc peer-ids)]
-    (mapv #(create-server+ % peer-ids rpc) peer-ids)))
-
-(defn each-server [servers f]
-  (map #(-> % :server-agt deref f) servers))
-
-(defn leaders [servers]
-  (filter #(leader? (-> % :server-agt deref)) servers))
-
-(defn leader [servers]
-  (first (leaders servers)))
