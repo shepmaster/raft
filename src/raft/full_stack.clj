@@ -2,10 +2,10 @@
   (:require [raft.core :as raft]
             [raft.rpc.in-memory :as in-memory]))
 
-(defn create-servers []
+(defn create-servers [command-fn]
   (let [peer-ids [1 2 3]
         rpc (in-memory/create peer-ids)]
-    (mapv #(raft/create-server+ % peer-ids rpc) peer-ids)))
+    (mapv #(raft/create-server+ % peer-ids rpc command-fn) peer-ids)))
 
 (defn start [servers]
   (mapv raft/start-time-things servers))

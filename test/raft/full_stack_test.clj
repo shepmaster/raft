@@ -1,6 +1,7 @@
 (ns raft.full-stack-test
   (:require [clojure.test :refer :all]
             [raft.core :as raft]
+            [raft.state.register :as register]
             [raft.full-stack :refer :all]))
 
 (defn wait-for
@@ -16,7 +17,9 @@
     false))
 
 (deftest full-stack
-  (let [servers (create-servers)
+  (let [state (register/create)
+        process (partial register/process state)
+        servers (create-servers process)
         started (start servers)]
     (try
       (testing "There is only one leader"
@@ -27,7 +30,8 @@
         (testing "It only takes one term to establish a leader"
           (is (wait-for 300 #(= 1 (first terms))))))
       (testing "A user command is committed in reasonable time"
-        (let [command-finished (raft/user-command* (leader started) :command)]
-          (is (deref command-finished 300 false))))
+        (let [command-finished (raft/user-command* (leader started) [:set {:name :a, :to 5}])]
+          (is (deref command-finished 300 false))
+          (is (= 5 (:a @state)))))
       (finally
         (stop started)))))

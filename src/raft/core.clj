@@ -41,7 +41,7 @@
   ([server log]
      (assoc server
        :commit-index no-entries-log-index
-       :log log)))
+       :log (vec log))))
 
 (defn rand-int-in
   "Creates a random integer between the lower (inclusive) and upper
@@ -242,7 +242,7 @@
   (update-in server [:log] butlast))
 
 (defn add-log-entries [server entries]
-  (update-in server [:log] concat entries))
+  (update-in server [:log] into entries))
 
 (defn create-append-request-reply [server last-agreed-index]
   (->RPCReply :append-entries-response
@@ -321,9 +321,11 @@
     (if (append-entries-accepted? last-agreed-index)
       (let [server (-> server
                        (record-append-entries-acceptance sender last-agreed-index)
-                       (update-leader-commit-index))]
+                       (update-leader-commit-index))
+            commit-index (:commit-index server no-entries-log-index)]
         {:server server
-         :side-effects [(->LogEntryCommitted (:commit-index server))]})
+         :side-effects (if (not= no-entries-log-index commit-index)
+                         [(->LogEntryCommitted commit-index)])})
       {:server (record-append-entries-rejection server sender)})))
 
 (defn add-new-log-entry [server command]
@@ -365,6 +367,9 @@
         (handler args))
     (throw (Exception. (str "Unknown message " name)))))
 
+(defn log-command-at-index [server idx]
+  (-> server :log (get idx) :command))
+
 (defn receive* [server rpc committed-fn name args]
   (let [{:keys [server side-effects]} (receive-pure server name args)]
     (doseq [side-effect side-effects]
@@ -376,7 +381,7 @@
           RPCReply (send-off rpc rpc/send sender name args)
           RPCSend (send-off rpc rpc/send (:to side-effect) name args)
           LogEntryAdded (added-fn log-idx)
-          LogEntryCommitted (committed-fn log-idx))))
+          LogEntryCommitted (committed-fn log-idx (log-command-at-index server log-idx)))))
     server))
 
 ;; TODO: unify the create-* RPC functions w.r.t. how they create records
@@ -384,6 +389,8 @@
 ;; TODO: check all state precondition things
 
 ;; TODO: discard out-of date messages
+
+;; TODO: assert that the log always stays a vector
 
 ;; User commands
 
@@ -412,16 +419,17 @@
   (let [{:keys [inflight]} server+]
     (swap! inflight assoc log-idx idx-committed)))
 
-(defn committed-to-log [inflight log-idx]
+(defn committed-to-log [command-fn inflight log-idx command]
+  (command-fn command)
   (when-let [idx-committed (get @inflight log-idx)]
     (deliver idx-committed true)
     (swap! inflight dissoc log-idx)))
 
-(defn create-server+ [id peers rpc]
+(defn create-server+ [id peers rpc command-fn]
   (let [message-out (agent rpc)
         server-agt (agent (create-server id peers))
         inflight (atom {})
-        committed-fn (partial committed-to-log inflight)
+        committed-fn (partial committed-to-log command-fn inflight)
         process-message (partial send server-agt receive* message-out committed-fn)]
     {:process-message process-message
      :message-out message-out
