@@ -8,8 +8,6 @@
 (defrecord LogEntryAdded [log-idx added-fn])
 (defrecord LogEntryCommitted [log-idx])
 
-;; --
-
 ;; The paper assumes that lists start at index 1, not 0 as
 ;; Clojure expects.
 (def first-log-entry-index 0)
@@ -78,15 +76,6 @@
 
 (defn log-command-at-index [server idx]
   (-> server :log (get idx) :command))
-
-(defn rand-int-in
-  "Creates a random integer between the lower (inclusive) and upper
-  (exclusive) bounds"
-  [min max]
-  (+ min (rand-int (- max min))))
-
-(def election-timeout-ms-min 150)
-(def election-timeout-ms-max 300)
 
 (defn create-server
   "peers must be a sequence of connection ids. This server should be
@@ -397,6 +386,16 @@
 
 ;; User commands
 
+(defn rand-int-in
+  "Creates a random integer between the lower (inclusive) and upper
+  (exclusive) bounds"
+  [min max]
+  (+ min (rand-int (- max min))))
+
+(def election-timeout-ms-min 150)
+(def election-timeout-ms-max 300)
+(def heartbeat-period-ms 50)
+
 (defn message-pump [switch recv process-message]
   (when @switch
     (if-let [[name args] (recv)]
@@ -440,8 +439,6 @@
      :message-in (create-message-in rpc id process-message)
      :heartbeat (create-heartbeat)
      :inflight inflight}))
-
-(def heartbeat-period-ms 50)
 
 (defn start-time-things [server+]
   (.start (-> server+ :message-in :pump))
