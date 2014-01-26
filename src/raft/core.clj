@@ -43,6 +43,42 @@
        :commit-index no-entries-log-index
        :log (vec log))))
 
+(defn log-last-term [server]
+  (:term (last (:log server)) no-entries-log-term))
+
+(defn log-length [server]
+  (count (:log server)))
+
+(defn log-last-entry-index [server]
+  (dec (log-length server)))
+
+(defn log-at-index [server idx]
+  (nth (:log server) idx nil))
+
+(defn log-at-index-is-term? [server idx term]
+  (if-let [entry (log-at-index server idx)]
+    (= term (:term entry))))
+
+(defn log-at-index-is-not-term? [server idx term]
+  (if-let [entry (log-at-index server idx)]
+    (not= term (:term entry))))
+
+(defn log-remove-last-entry [server]
+  (update-in server [:log] butlast))
+
+(defn log-add-entries [server entries]
+  (update-in server [:log] into entries))
+
+(defn log-add-new-entry [server command]
+  (log-add-entries server [{:term (:term server),
+                            :command command}]))
+
+(defn log-entries-at-index [server idx]
+  (take 1 (drop idx (:log server))))
+
+(defn log-command-at-index [server idx]
+  (-> server :log (get idx) :command))
+
 (defn rand-int-in
   "Creates a random integer between the lower (inclusive) and upper
   (exclusive) bounds"
@@ -89,18 +125,9 @@
   {:sender (:id server)
    :term (:term server)})
 
-(defn last-log-term [server]
-  (:term (last (:log server)) no-entries-log-term))
-
-(defn log-length [server]
-  (count (:log server)))
-
-(defn last-log-entry-index [server]
-  (dec (log-length server)))
-
 (defn create-request-vote [server]
   (-> (create-rpc-args server)
-      (assoc :last-log-term (last-log-term server)
+      (assoc :last-log-term (log-last-term server)
              :last-log-index (log-length server))))
 
 (defn voted-for? [server peer-id]
@@ -170,9 +197,9 @@
 
 (defn vote-request-current? [server request-last-log-term request-last-log-index]
   (or
-   (> request-last-log-term (last-log-term server))
+   (> request-last-log-term (log-last-term server))
    (and
-    (= request-last-log-term (last-log-term server))
+    (= request-last-log-term (log-last-term server))
     (>= request-last-log-index (log-length server)))))
 
 (defn handle-request-vote [server args]
@@ -187,17 +214,6 @@
 (defn handle-request-vote-response [server args]
   (let [{:keys [sender vote-granted]} args]
     {:server (change-state-from-request-vote-response server sender vote-granted)}))
-
-(defn log-at-index [server idx]
-  (nth (:log server) idx nil))
-
-(defn log-at-index-is-term? [server idx term]
-  (if-let [entry (log-at-index server idx)]
-    (= term (:term entry))))
-
-(defn log-at-index-is-not-term? [server idx term]
-  (if-let [entry (log-at-index server idx)]
-    (not= term (:term entry))))
 
 (defn accept-append-entries? [server args]
   (let [{:keys [term previous-log-index previous-log-term]} args]
@@ -238,12 +254,6 @@
 (defn update-commit-index [server commit-index]
   (assoc server :commit-index commit-index))
 
-(defn remove-last-log-entry [server]
-  (update-in server [:log] butlast))
-
-(defn add-log-entries [server entries]
-  (update-in server [:log] into entries))
-
 (defn create-append-request-reply [server last-agreed-index]
   (->RPCReply :append-entries-response
               (-> (create-rpc-args server)
@@ -264,11 +274,11 @@
    :side-effects [(create-accept-append-request server args)]})
 
 (defmethod handle-append-entries :conflict [server args]
-  {:server (remove-last-log-entry server)})
+  {:server (log-remove-last-entry server)})
 
 (defmethod handle-append-entries :no-conflict [server args]
   (let [entries (take 1 (:entries args))]
-    {:server (add-log-entries server entries)}))
+    {:server (log-add-entries server entries)}))
 
 (defmethod handle-append-entries :rejected [server args]
   {:server server
@@ -283,7 +293,7 @@
                :previous-log-term (if (no-entries-log-index? previous-index)
                                     no-entries-log-term
                                     (:term (log-at-index server previous-index)))
-               :entries (take 1 (drop entry-index (:log server)))))))
+               :entries (log-entries-at-index server entry-index)))))
 
 (defn quorum-last-agreed-index
   "Returns the smallest log index that a quorum of the servers
@@ -328,10 +338,6 @@
                          [(->LogEntryCommitted commit-index)])})
       {:server (record-append-entries-rejection server sender)})))
 
-(defn add-new-log-entry [server command]
-  (add-log-entries server [{:term (:term server),
-                            :command command}]))
-
 (defn create-all-append-entries-requests [server]
   (map (fn [id] (->RPCSend id :append-entries (create-append-entries-request server id)))
        (other-peer-ids server)))
@@ -339,10 +345,10 @@
 ;; TODO: assert only leader
 (defn handle-user-command [server args]
   (let [{:keys [command added-fn]} args
-        server (add-new-log-entry server command)]
+        server (log-add-new-entry server command)]
     {:server server
      :side-effects (conj (create-all-append-entries-requests server)
-                         (->LogEntryAdded (last-log-entry-index server) added-fn))}))
+                         (->LogEntryAdded (log-last-entry-index server) added-fn))}))
 
 (defn handle-heartbeat [server _]
   {:server server
@@ -366,9 +372,6 @@
         (become-follower (:term args no-entries-log-term))
         (handler args))
     (throw (Exception. (str "Unknown message " name)))))
-
-(defn log-command-at-index [server idx]
-  (-> server :log (get idx) :command))
 
 (defn receive* [server rpc committed-fn name args]
   (let [{:keys [server side-effects]} (receive-pure server name args)]
